@@ -2,11 +2,11 @@ cmake_minimum_required(VERSION 3.20)
 
 project(Microphysics
     VERSION 1.0.0
-    DESCRIPTION "building primordial_chemistry or metal_chemistry networks in Microphysics with CMake"
+    DESCRIPTION "Building networks in Microphysics with CMake"
     LANGUAGES CXX C)
 
 #----------------------------------------------------------------------------------------------------------------------
-# general settings and options
+# General settings and options
 #----------------------------------------------------------------------------------------------------------------------
 
 find_package (Python COMPONENTS Interpreter Development)
@@ -15,14 +15,173 @@ find_package(Threads)
 include(CTest)
 include(CMakePackageConfigHelpers)
 
-#use this function to build Microphysics using different EOS for different test problems in external codes
+#----------------------------------------------------------------------------------------------------------------------
+# Network registry
+#----------------------------------------------------------------------------------------------------------------------
+#
+# This file registers only networks self-contained within Microphysics. Networks with paths outside
+# Microphysics are registered by the external code instead -- see src/networks/NetworkRegistry.cmake
+# for Quokka's.
+#
+# Fields (unset ones default to empty/FALSE):
+#   EOSDIR                    Directory name under EOS/.
+#   EOSPARAMFILE              Path to the EOS's _parameters file.
+#   PARAMFILE                 The network's unit-test _parameters file. Only read when UNIT_TEST_GATE
+#                             is ON, and no problem in this family ships a unit-test _parameters file.
+#   NETWORKPARAMFILE          The network's own _parameters file.
+#   HAS_NET_FILE              TRUE if the network has a general_null-style .net file for
+#                             write_network.py/get_naux.py to process. When FALSE, network_properties.H
+#                             comes from NSPEC/SPECIES_ENUM/AION/... instead -- from the registry for a
+#                             hand-written network, or from write_jaff_network_vars.py for a jaff one
+#                             (see IS_JAFF).
+#   NETWORKFILE               Path to the .net file (only used if HAS_NET_FILE).
+#   NETWORKDIR                Directory holding it (only used if HAS_NET_FILE).
+#   UNIT_TEST_GATE            NAME of the BUILD_UNIT_TEST_* cache variable gating whether the unit-test
+#                             paramfiles join the write_probin.py call.
+#   IS_JAFF                   TRUE if jaff-generated, so write_jaff_network_vars.py runs to derive
+#                             NSPEC/SPECIES_ENUM/SPEC_NAMES/CHEM_BANDS instead of reading them from the
+#                             registry (mutually exclusive with the registry fields below). Also adds
+#                             -DIS_JAFF to the target(s) the caller adds afterwards, for jaff-specific
+#                             C++ code paths (e.g. integrator_rhs_strang.H/integrator_rhs_sdc.H skipping
+#                             the redundant pd.zero() that jaff-generated Jacobians already do).
+#   JAFF_TOML                 Path to the network's jaffgen.toml. Only used if IS_JAFF. Out-of-tree
+#                             networks (e.g. Quokka's) live outside Microphysics, so this must be
+#                             supplied by the registry entry rather than derived from a path relative
+#                             to Microphysics itself.
+#   HEADER_TEMPLATE           Path to the network_header.template used by configure_file() when
+#                             HAS_NET_FILE is FALSE. Defaults to Microphysics's own
+#                             networks/general_null/network_header.template. Out-of-tree networks
+#                             (e.g. Quokka's) that need extra substitution variables supply their own.
+#   USES_INTEGRATOR_DIRS      TRUE unless the network has no burn_t-based integrator of its own
+#                             (gamma_law).
+#   EXTRA_SOURCES             Extra .cpp sources.
+#   NETWORK_INCLUDE_DIRS      Network-specific include dirs. Order and contents differ per network.
+#   NSPEC, NUM_CHEM_BANDS,    Only used when HAS_NET_FILE is FALSE and IS_JAFF is FALSE, to fill in
+#   POWER_LAW_INDEX,          network_header.template via configure_file(). Ignored for jaff networks,
+#   SPECIES_ENUM, SPEC_NAMES, which derive the same values from jaff's own _parameters/jaffgen.toml at
+#   SHORT_SPEC_NAMES, AION,   configure time instead (see IS_JAFF).
+#   AION_INV, ZION,
+#   AION_CONSTEXPR,
+#   ZION_CONSTEXPR, CHEM_BANDS
+
+set(_registry_one_value_fields
+      EOSDIR EOSPARAMFILE PARAMFILE
+      NETWORKPARAMFILE HAS_NET_FILE NETWORKFILE NETWORKDIR
+      UNIT_TEST_GATE IS_JAFF JAFF_TOML HEADER_TEMPLATE USES_INTEGRATOR_DIRS
+      NSPEC NUM_CHEM_BANDS POWER_LAW_INDEX
+      SPECIES_ENUM SPEC_NAMES SHORT_SPEC_NAMES
+      AION AION_INV ZION AION_CONSTEXPR ZION_CONSTEXPR CHEM_BANDS
+      CACHE INTERNAL "")
+set(_registry_multi_value_fields EXTRA_SOURCES NETWORK_INCLUDE_DIRS CACHE INTERNAL "")
+set(_registry_fields ${_registry_one_value_fields} ${_registry_multi_value_fields} CACHE INTERNAL "")
+
+macro(register_microphysics_network network_name)
+  cmake_parse_arguments(_reg "" "${_registry_one_value_fields}" "${_registry_multi_value_fields}" ${ARGN})
+  if (DEFINED _reg_UNPARSED_ARGUMENTS)
+    message(FATAL_ERROR "register_microphysics_network(${network_name}): unrecognized arguments: ${_reg_UNPARSED_ARGUMENTS}")
+  endif()
+
+  foreach(_field ${_registry_fields})
+    set(${network_name}_${_field} "${_reg_${_field}}" CACHE INTERNAL "")
+  endforeach()
+
+  if (NOT network_name IN_LIST KNOWN_NETWORK_NAMES)
+    set(KNOWN_NETWORK_NAMES ${KNOWN_NETWORK_NAMES} ${network_name} CACHE INTERNAL "")
+  endif()
+endmacro()
+
+set(KNOWN_NETWORK_NAMES "" CACHE INTERNAL "")
+
+register_microphysics_network(gamma_law
+  EOSDIR            "gamma_law"
+  EOSPARAMFILE      "${CMAKE_CURRENT_LIST_DIR}/EOS/gamma_law/_parameters"
+  NETWORKPARAMFILE  "${CMAKE_CURRENT_LIST_DIR}/networks/_parameters"
+  HAS_NET_FILE      TRUE
+  NETWORKFILE       "${CMAKE_CURRENT_LIST_DIR}/networks/general_null/gammalaw.net"
+  NETWORKDIR        "${CMAKE_CURRENT_LIST_DIR}/networks/general_null/"
+  EXTRA_SOURCES     "${CMAKE_CURRENT_LIST_DIR}/interfaces/eos_data.cpp"
+                    "${CMAKE_CURRENT_LIST_DIR}/interfaces/network_initialization.cpp"
+  USES_INTEGRATOR_DIRS FALSE
+  NETWORK_INCLUDE_DIRS "${CMAKE_CURRENT_LIST_DIR}/networks"
+                        "${CMAKE_CURRENT_LIST_DIR}/networks/general_null"
+)
+
+register_microphysics_network(primordial_chem
+  EOSDIR            "primordial_chem"
+  EOSPARAMFILE      "${CMAKE_CURRENT_LIST_DIR}/EOS/primordial_chem/_parameters"
+  PARAMFILE         "${CMAKE_CURRENT_LIST_DIR}/unit_test/burn_cell_primordial_chem/_parameters"
+  NETWORKPARAMFILE  "${CMAKE_CURRENT_LIST_DIR}/networks/primordial_chem/_parameters"
+  HAS_NET_FILE      TRUE
+  NETWORKFILE       "${CMAKE_CURRENT_LIST_DIR}/networks/primordial_chem/pynucastro.net"
+  NETWORKDIR        "${CMAKE_CURRENT_LIST_DIR}/networks/primordial_chem/"
+  EXTRA_SOURCES     "${CMAKE_CURRENT_LIST_DIR}/interfaces/eos_data.cpp"
+                    "${CMAKE_CURRENT_LIST_DIR}/interfaces/network_initialization.cpp"
+                    "${CMAKE_CURRENT_LIST_DIR}/networks/primordial_chem/actual_network_data.cpp"
+  UNIT_TEST_GATE    "BUILD_UNIT_TEST_PC"
+  USES_INTEGRATOR_DIRS TRUE
+  NETWORK_INCLUDE_DIRS "${CMAKE_CURRENT_LIST_DIR}/networks/primordial_chem"
+                        "${CMAKE_CURRENT_LIST_DIR}/networks"
+)
+
+# Unlike primordial_chem, actual_network_data.cpp is needed here because
+# that's where the Semenov opacity table is read in.
+register_microphysics_network(metal_chem
+  EOSDIR            "metal_chem"
+  EOSPARAMFILE      "${CMAKE_CURRENT_LIST_DIR}/EOS/metal_chem/_parameters"
+  PARAMFILE         "${CMAKE_CURRENT_LIST_DIR}/unit_test/burn_cell_metal_chem/_parameters"
+  NETWORKPARAMFILE  "${CMAKE_CURRENT_LIST_DIR}/networks/metal_chem/_parameters"
+  HAS_NET_FILE      TRUE
+  NETWORKFILE       "${CMAKE_CURRENT_LIST_DIR}/networks/metal_chem/pynucastro.net"
+  NETWORKDIR        "${CMAKE_CURRENT_LIST_DIR}/networks/metal_chem/"
+  EXTRA_SOURCES     "${CMAKE_CURRENT_LIST_DIR}/interfaces/eos_data.cpp"
+                    "${CMAKE_CURRENT_LIST_DIR}/interfaces/network_initialization.cpp"
+                    "${CMAKE_CURRENT_LIST_DIR}/networks/metal_chem/actual_network_data.cpp"
+  UNIT_TEST_GATE    "BUILD_UNIT_TEST_MC"
+  USES_INTEGRATOR_DIRS TRUE
+  NETWORK_INCLUDE_DIRS "${CMAKE_CURRENT_LIST_DIR}/networks/metal_chem"
+                        "${CMAKE_CURRENT_LIST_DIR}/networks"
+)
+
+# Builds Microphysics with a given network/EOS for one target in an external code.
+#
+#   setup_target_for_microphysics_compilation(network_name output_dir
+#                                             [INTEGRATOR <name>]
+#                                             [<FIELD> <value> ...])
+#
+# network_name is looked up in the registry; INTEGRATOR picks the integration subdirectory,
+# defaulting to Rosenbrock. Any FIELD may be passed directly to override the registry, or to
+# describe a network that isn't registered at all.
 function(setup_target_for_microphysics_compilation network_name output_dir)
 
-  set(networkparamfile "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/_parameters")
-  set(integrator_name "VODE")
-  if(ARGC GREATER 2)
-    set(integrator_name "${ARGV2}")
+  cmake_parse_arguments(PARSE_ARGV 2 _arg
+                        ""
+                        "INTEGRATOR;${_registry_one_value_fields}"
+                        "${_registry_multi_value_fields}")
+  if (DEFINED _arg_UNPARSED_ARGUMENTS)
+    message(FATAL_ERROR "setup_target_for_microphysics_compilation(${network_name}): unrecognized arguments: ${_arg_UNPARSED_ARGUMENTS}")
   endif()
+
+  set(integrator_name "Rosenbrock")
+  if (DEFINED _arg_INTEGRATOR)
+    set(integrator_name "${_arg_INTEGRATOR}")
+  endif()
+
+  set(_any_field_given FALSE)
+  foreach(_field ${_registry_fields})
+    if (DEFINED _arg_${_field})
+      set(_f_${_field} "${_arg_${_field}}")
+      set(_any_field_given TRUE)
+    else()
+      set(_f_${_field} "${${network_name}_${_field}}")
+    endif()
+  endforeach()
+
+  if (NOT network_name IN_LIST KNOWN_NETWORK_NAMES AND NOT _any_field_given)
+    message(FATAL_ERROR "Given network_name '${network_name}' is not registered (via register_microphysics_network()) "
+                         "and no fields were supplied explicitly. Known networks: ${KNOWN_NETWORK_NAMES}")
+  endif()
+
+  set(networkparamfile "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/_parameters")
   set(integrator_dir "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/integration/${integrator_name}")
   if(NOT EXISTS "${integrator_dir}/actual_integrator.H")
     message(FATAL_ERROR "Given integrator_name ${integrator_name} does not provide ${integrator_dir}/actual_integrator.H")
@@ -31,127 +190,108 @@ function(setup_target_for_microphysics_compilation network_name output_dir)
   set(integrationparamfile "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/integration/_parameters")
   set(unittestparamfile "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/unit_test/_parameters")
 
+  set(networkpropfile "${output_dir}/network_properties.H")
+  set(networkheadertemplatefile "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/general_null/network_header.template")
 
-  if (${network_name} STREQUAL "gamma_law")
-    set(EOSparamfile "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/EOS/gamma_law/_parameters")
+  #DO NOT change the order of the directories below! (NETWORK_INCLUDE_DIRS' own internal
+  #order/contents are set per-network in the registry above)
+  set(integrator_dirs "")
+  if (_f_USES_INTEGRATOR_DIRS)
+    set(integrator_dirs ${integrator_dir} ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/integration/utils
+                         ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/integration)
+  endif()
+  set(_dirs ${CMAKE_BINARY_DIR} ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/util ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/util/gcem/include
+            ${integrator_dirs} ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/interfaces
+            ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/EOS ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/EOS/${_f_EOSDIR}
+            ${_f_NETWORK_INCLUDE_DIRS}
+            ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/constants)
+  # <EOSDIR>_dirs: kept for networks in the same family that already read it by
+  # that shared name (see the EOSDIR field comment above). <network_name>_dirs:
+  # always exported too, so a caller can use this target's exact network_name
+  # without needing to know which EOSDIR family it belongs to.
+  set(${_f_EOSDIR}_dirs ${_dirs} PARENT_SCOPE)
+  set(${network_name}_dirs ${_dirs} PARENT_SCOPE)
 
-    set(networkpropfile "${output_dir}/network_properties.H")
-    set(networkfile "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/general_null/gammalaw.net")
-    set(networkdir "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/general_null/")
-    set(networkheadertemplatefile "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/general_null/network_header.template")
-
-    set (gamma_law_dirs ${CMAKE_BINARY_DIR} ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/util ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/util/gcem/include
-                             ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/interfaces
-                             ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/EOS ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/EOS/gamma_law
-                             ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/general_null
-                             ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/constants PARENT_SCOPE)
-
-    execute_process(COMMAND python3 "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/util/build_scripts/write_probin.py" --pa "${EOSparamfile} ${networkparamfile}
-                    ${integratorparamfile} ${integrationparamfile}" --use_namespace WORKING_DIRECTORY ${output_dir}/)
-
-    set(gamma_law_sources ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/interfaces/eos_data.cpp
-                          ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/interfaces/network_initialization.cpp
-                          ${output_dir}/extern_parameters.cpp PARENT_SCOPE)
-    execute_process(COMMAND python3 "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/general_null/write_network.py" --header_template "${networkheadertemplatefile}" --header_output "${networkpropfile}" -s "${networkfile}" WORKING_DIRECTORY ${output_dir}/)
-
-  elseif (${network_name} STREQUAL "primordial_chem")
-    #need these to write extern_parameters.H
-    set(paramfile "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/unit_test/burn_cell_primordial_chem/_parameters")
-    set(EOSparamfile "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/EOS/primordial_chem/_parameters")
-    set(networkpcparamfile "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/primordial_chem/_parameters")
-
-    #similarly, we want network_properties.H
-    set(networkpropfile "${output_dir}/network_properties.H")
-    set(networkfile "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/primordial_chem/pynucastro.net")
-    set(networkdir "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/primordial_chem/")
-    set(networkheadertemplatefile "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/general_null/network_header.template")
-
-    #DO NOT change the order of the directories below!
-    set (primordial_chem_dirs ${CMAKE_BINARY_DIR} ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/util ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/util/gcem/include
-                             ${integrator_dir} ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/integration/utils
-                             ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/integration ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/interfaces
-                             ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/EOS ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/EOS/primordial_chem
-                             ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/primordial_chem ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks
-                             ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/constants
-                             PARENT_SCOPE)
-
-    #we need to have extern_parameters.cpp be available at configure time
-    #the script write_probin.py writes this .cpp file so we call it here
-    #note, execute_process only works on 'cmake' and not 'make'
-    #so, if any of the _parameter files are changed, one needs to re-run 'cmake'
-    #to generate updated header files
-
-    if(BUILD_UNIT_TEST_PC)
-      execute_process(COMMAND python3 "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/util/build_scripts/write_probin.py" --pa "${paramfile} ${EOSparamfile}
-                      ${networkpcparamfile} ${networkparamfile} ${integratorparamfile} ${integrationparamfile} ${unittestparamfile}" --use_namespace WORKING_DIRECTORY ${output_dir}/)
-    else()
-      #do not need paramfile and unittestparamfile
-      execute_process(COMMAND python3 "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/util/build_scripts/write_probin.py" --pa "${EOSparamfile} ${networkpcparamfile}
-                      ${networkparamfile} ${integratorparamfile} ${integrationparamfile} " --use_namespace WORKING_DIRECTORY ${output_dir}/)
-    endif()
-
-    set(primordial_chem_sources ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/interfaces/eos_data.cpp
-                                ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/interfaces/network_initialization.cpp
-                                ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/primordial_chem/actual_network_data.cpp
-                                ${output_dir}/extern_parameters.cpp PARENT_SCOPE)
-
-
-    #below for NAUX
-    execute_process(COMMAND ${CMAKE_COMMAND} -E env "PYTHONPATH=${PYTHONPATH}:${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/general_null" python3 "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/get_naux.py" --net "${networkdir}" --microphysics_path "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/" WORKING_DIRECTORY ${output_dir}/)
-    execute_process(COMMAND python3 "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/general_null/write_network.py" --header_template "${networkheadertemplatefile}" --header_output "${networkpropfile}" -s "${networkfile}" WORKING_DIRECTORY ${output_dir}/)
-
-  elseif (${network_name} STREQUAL "metal_chem")
-    #need these to write extern_parameters.H
-    set(paramfile "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/unit_test/burn_cell_metal_chem/_parameters")
-    set(EOSparamfile "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/EOS/metal_chem/_parameters")
-    set(networkmcparamfile "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/metal_chem/_parameters")
-
-    #similarly, we want network_properties.H
-    set(networkpropfile "${output_dir}/network_properties.H")
-    set(networkfile "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/metal_chem/pynucastro.net")
-    set(networkdir "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/metal_chem/")
-    set(networkheadertemplatefile "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/general_null/network_header.template")
-
-    #DO NOT change the order of the directories below!
-    set (metal_chem_dirs ${CMAKE_BINARY_DIR} ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/util ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/util/gcem/include
-                             ${integrator_dir} ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/integration/utils
-                             ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/integration ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/interfaces
-                             ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/EOS ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/EOS/metal_chem
-                             ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/metal_chem ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks
-                             ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/constants
-                             PARENT_SCOPE)
-
-    #we need to have extern_parameters.cpp be available at configure time
-    #the script write_probin.py writes this .cpp file so we call it here
-    #note, execute_process only works on 'cmake' and not 'make'
-    #so, if any of the _parameter files are changed, one needs to re-run 'cmake'
-    #to generate updated header files
-
-    if(BUILD_UNIT_TEST_MC)
-      execute_process(COMMAND python3 "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/util/build_scripts/write_probin.py" --pa "${paramfile} ${EOSparamfile}
-                      ${networkmcparamfile} ${networkparamfile} ${integratorparamfile} ${integrationparamfile} ${unittestparamfile}" --use_namespace WORKING_DIRECTORY ${output_dir}/)
-    else()
-      #do not need paramfile and unittestparamfile
-      execute_process(COMMAND python3 "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/util/build_scripts/write_probin.py" --pa "${EOSparamfile} ${networkmcparamfile}
-                      ${networkparamfile} ${integratorparamfile} ${integrationparamfile} " --use_namespace WORKING_DIRECTORY ${output_dir}/)
-    endif()
-
-    #unlike primordial chem, we also include actual_network_data.cpp here because it is in there that we read in the Semenov opacity table
-    set(metal_chem_sources ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/interfaces/eos_data.cpp
-                           ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/interfaces/network_initialization.cpp
-                           ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/metal_chem/actual_network_data.cpp
-                           ${output_dir}/extern_parameters.cpp PARENT_SCOPE)
-
-
-    #below for NAUX
-    execute_process(COMMAND ${CMAKE_COMMAND} -E env "PYTHONPATH=${PYTHONPATH}:${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/general_null" python3 "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/get_naux.py" --net "${networkdir}" --microphysics_path "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/" WORKING_DIRECTORY ${output_dir}/)
-    execute_process(COMMAND python3 "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/general_null/write_network.py" --header_template "${networkheadertemplatefile}" --header_output "${networkpropfile}" -s "${networkfile}" WORKING_DIRECTORY ${output_dir}/)
-
-  else()
-    message(FATAL_ERROR "Given network_name " ${network_name} " currently not supported. Use either 'gamma_law' or 'primordial_chem' or 'metal_chem' ")
-
+  if (_f_IS_JAFF)
+    add_compile_definitions(IS_JAFF)
   endif()
 
+  set(probin_paramfiles "${_f_EOSPARAMFILE} ${_f_NETWORKPARAMFILE} ${networkparamfile} ${integratorparamfile} ${integrationparamfile}")
+  if (NOT "${_f_UNIT_TEST_GATE}" STREQUAL "")
+    if (${_f_UNIT_TEST_GATE})
+      set(probin_paramfiles "${_f_PARAMFILE} ${probin_paramfiles} ${unittestparamfile}")
+    endif()
+  endif()
+
+  execute_process(COMMAND python3 "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/util/build_scripts/write_probin.py"
+                  --pa "${probin_paramfiles}" --use_namespace WORKING_DIRECTORY ${output_dir}/)
+
+  # Same <EOSDIR>_sources / <network_name>_sources duality as <EOSDIR>_dirs above.
+  set(_sources ${_f_EXTRA_SOURCES} ${output_dir}/extern_parameters.cpp)
+  set(${_f_EOSDIR}_sources ${_sources} PARENT_SCOPE)
+  set(${network_name}_sources ${_sources} PARENT_SCOPE)
+
+  if (_f_HAS_NET_FILE)
+    execute_process(COMMAND python3 "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/networks/general_null/write_network.py" --header_template "${networkheadertemplatefile}" --header_output "${networkpropfile}" -s "${_f_NETWORKFILE}" WORKING_DIRECTORY ${output_dir}/)
+  endif()
+
+  if (_f_IS_JAFF)
+    if ("${_f_JAFF_TOML}" STREQUAL "")
+      message(FATAL_ERROR "setup_target_for_microphysics_compilation(${network_name}): IS_JAFF is TRUE but JAFF_TOML was not given (via the registry or an override)")
+    endif()
+    set(jaff_network_vars_file "${output_dir}/jaff_network_vars.cmake")
+    execute_process(COMMAND python3 "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/util/build_scripts/write_jaff_network_vars.py"
+                    --network-parameters "${_f_NETWORKPARAMFILE}"
+                    --jaff-toml "${_f_JAFF_TOML}"
+                    --output "${jaff_network_vars_file}"
+                    WORKING_DIRECTORY ${output_dir}/
+                    RESULT_VARIABLE jaff_network_vars_result)
+    if (NOT jaff_network_vars_result EQUAL 0)
+      message(FATAL_ERROR "write_jaff_network_vars.py failed for network ${network_name}")
+    endif()
+    set(jaff_network_vars_file "${jaff_network_vars_file}" PARENT_SCOPE)
+  endif()
+
+  if (NOT _f_HAS_NET_FILE)
+    set(NEXTRASPEC 0)
+    set(PROPERTIES "")
+
+    if (_f_IS_JAFF)
+      include(${jaff_network_vars_file})
+    else()
+      # Hand-written network: NSPEC/SPECIES_ENUM/AION/... come from the
+      # registry (see register_microphysics_network() field comments above)
+      # instead of from write_jaff_network_vars.py.
+      set(NSPEC "${_f_NSPEC}")
+      set(SPECIES_ENUM "${_f_SPECIES_ENUM}")
+      set(SPEC_NAMES "${_f_SPEC_NAMES}")
+      set(SHORT_SPEC_NAMES "${_f_SHORT_SPEC_NAMES}")
+      set(AION "${_f_AION}")
+      set(AION_INV "${_f_AION_INV}")
+      set(ZION "${_f_ZION}")
+      # '|' -> ';':
+      string(REPLACE "|" ";" AION_CONSTEXPR "${_f_AION_CONSTEXPR}")
+      string(REPLACE "|" ";" ZION_CONSTEXPR "${_f_ZION_CONSTEXPR}")
+      set(NUM_CHEM_BANDS "${_f_NUM_CHEM_BANDS}")
+      set(CHEM_BANDS "${_f_CHEM_BANDS}")
+      set(POWER_LAW_INDEX "${_f_POWER_LAW_INDEX}")
+    endif()
+
+    include_directories(
+      BEFORE ${_dirs} "${output_dir}"
+      "includes/extern_parameters.H" "includes/network_properties.H")
+
+    set(_header_template "${networkheadertemplatefile}")
+    if (NOT "${_f_HEADER_TEMPLATE}" STREQUAL "")
+      set(_header_template "${_f_HEADER_TEMPLATE}")
+    endif()
+
+    configure_file(
+        ${_header_template}
+        ${networkpropfile}
+        @ONLY
+    )
+  endif()
 
 endfunction()
 

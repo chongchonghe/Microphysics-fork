@@ -1,6 +1,7 @@
 #ifndef VODE_DVSTEP_H
 #define VODE_DVSTEP_H
 
+#include "network.H"
 #include <vode_type.H>
 #include <vode_dvset.H>
 #include <vode_dvjust.H>
@@ -299,6 +300,47 @@ int dvstep (BurnT& state, DvodeT& vstate)
 #endif
 
         }
+
+#ifdef PHOTOCHEMISTRY
+        for (int i = net_ienuc + 1; i <= int_neqs; i+=MicrophysicsNumRadVarsPerGroup) {
+
+#ifdef STRANG
+            // Constrain radiation quantities such that they don't change by more than a certain
+            // factor in a given step (as long as their initial value was large enough
+            // for us to worry about).
+
+            if (std::abs(y_save(i)) > integrator_rp::X_reject_buffer * vstate.atol_rad_num &&
+                std::abs(vstate.y(i)) > integrator_rp::X_reject_buffer * vstate.atol_rad_num &&
+                (std::abs(vstate.y(i)) > vode_increase_change_factor * std::abs(y_save(i)) ||
+                 std::abs(vstate.y(i)) < vode_decrease_change_factor * std::abs(y_save(i)))) {
+#ifdef MICROPHYSICS_DEBUG
+#ifndef AMREX_USE_GPU
+               std::cout << "rejecting step based on species " << i << " from " << y_save(i) << " to " << vstate.y(i) << std::endl;
+#endif
+#endif
+                valid_update = false;
+                break;
+            }
+
+            // Flux change-factor check removed: flux is a passive scalar, one-way coupled.
+            // Convergence of N_gamma ensures convergence of flux; checking flux here
+            // wastes steps in dark cells where flux -> 0.
+
+            // Constrain abundances such that they are not negative (within a tolerance)
+            // or greater than one (within a tolerance).
+            if (vstate.y(i) < -integrator_rp::radiation_failure_tolerance) {
+                valid_update = false;
+                break;
+            }
+#endif
+
+#ifdef SDC
+            // Abort the program. This is unimplemented
+            amrex::Abort("SDC does not yet support radiation updates");
+#endif
+
+        }
+#endif
 
         // The corrector has converged (NFLAG = 0). The local error test is
         // made and control passes to statement 500 if it fails.

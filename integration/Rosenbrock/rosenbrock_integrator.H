@@ -126,14 +126,32 @@ template <typename RosenbrockT>
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real rtol_for (const RosenbrockT& rstate, const int n)
 {
-    return n == net_ienuc ? rstate.rtol_enuc : rstate.rtol_spec;
+    if (n == net_ienuc) {
+        return rstate.rtol_enuc;
+    }
+#ifdef PHOTOCHEMISTRY
+    if (n > net_ienuc) {
+        const int group_offset = (n - net_ienuc - 1) % MicrophysicsNumRadVarsPerGroup;
+        return group_offset == 0 ? rstate.rtol_rad_num : 1.0e30;
+    }
+#endif
+    return rstate.rtol_spec;
 }
 
 template <typename RosenbrockT>
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real atol_for (const RosenbrockT& rstate, const int n)
 {
-    return n == net_ienuc ? rstate.atol_enuc : rstate.atol_spec;
+    if (n == net_ienuc) {
+        return rstate.atol_enuc;
+    }
+#ifdef PHOTOCHEMISTRY
+    if (n > net_ienuc) {
+        const int group_offset = (n - net_ienuc - 1) % MicrophysicsNumRadVarsPerGroup;
+        return group_offset == 0 ? rstate.atol_rad_num : 1.0e30;
+    }
+#endif
+    return rstate.atol_spec;
 }
 
 template <int int_neqs>
@@ -144,8 +162,18 @@ amrex::Real error_norm (const rosenbrock_t<int_neqs>& rstate)
     for (int n = 1; n <= int_neqs; ++n) {
         const amrex::Real sk = atol_for(rstate, n) +
             rtol_for(rstate, n) * amrex::max(std::abs(rstate.y(n)), std::abs(rstate.ynew(n)));
-        const amrex::Real term = rstate.work(n) / sk;
-        err += term * term;
+#ifdef PHOTOCHEMISTRY
+    const int group_offset = (n - net_ienuc - 1) % MicrophysicsNumRadVarsPerGroup;
+    amrex::Real term;
+    if (n > net_ienuc && group_offset != 0) {
+        term = 0.0_rt;
+    } else {
+        term = rstate.work(n) / sk;
+    }
+#else
+    const amrex::Real term = rstate.work(n) / sk;
+#endif
+    err += term * term;
     }
     return std::sqrt(err / static_cast<amrex::Real>(int_neqs));
 }
@@ -169,29 +197,6 @@ bool species_change_valid (const rosenbrock_t<int_neqs>& rstate)
 #endif
 
     return true;
-}
-
-template <int int_neqs>
-AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-amrex::Real yass_change_norm (const rosenbrock_t<int_neqs>& rstate)
-{
-    amrex::Real max_change = 0.0_rt;
-    amrex::Real max_species = 0.0_rt;
-
-    for (int i = 1; i <= NumSpec && i <= int_neqs; ++i) {
-        max_species = amrex::max(max_species, std::abs(rstate.y(i)));
-    }
-
-    const amrex::Real active_floor = integrator_rp::yass_floor * max_species;
-
-    for (int i = 1; i <= NumSpec && i <= int_neqs; ++i) {
-        const amrex::Real yi = std::abs(rstate.y(i));
-        if (yi > active_floor) {
-            max_change = amrex::max(max_change, std::abs(rstate.ynew(i) - rstate.y(i)) / yi);
-        }
-    }
-
-    return max_change / integrator_rp::yass_epsilon;
 }
 
 template <typename MatrixType, int int_neqs>
@@ -231,6 +236,14 @@ bool valid_integrator_state (const amrex::Array1D<amrex::Real, 1, int_neqs>& y)
             return false;
         }
     }
+
+#ifdef PHOTOCHEMISTRY
+    for (int n = net_ienuc+1; n <= net_ienuc+NumRadEqs; n += MicrophysicsNumRadVarsPerGroup) {
+        if (y(n) < -integrator_rp::atol_rad_num) {
+            return false;
+        }
+    }
+#endif
 
     if (y(net_ienuc) <= 0.0_rt) {
         return false;
@@ -379,15 +392,6 @@ int rosenbrock_integrator (BurnT& state, rosenbrock_t<integrator_neqs<BurnT>()>&
             rosenbrock::rtol_for(rstate, n) <= 10.0_rt * std::numeric_limits<amrex::Real>::epsilon()) {
             return IERR_TOO_MUCH_ACCURACY_REQUESTED;
         }
-    }
-
-    if (integrator_rp::rosenbrock_timestep_controller == 1 &&
-        (integrator_rp::yass_epsilon <= 0.0_rt ||
-         integrator_rp::yass_floor < 0.0_rt ||
-         integrator_rp::yass_fac_min <= 0.0_rt ||
-         integrator_rp::yass_fac_max < integrator_rp::yass_fac_min ||
-         integrator_rp::yass_reduction_fac <= 0.0_rt)) {
-        return IERR_BAD_INPUTS;
     }
 
     rstate.n_rhs = 0;
@@ -564,22 +568,13 @@ int rosenbrock_integrator (BurnT& state, rosenbrock_t<integrator_neqs<BurnT>()>&
             const bool valid_update = rosenbrock::species_change_valid(rstate);
             constexpr amrex::Real err_min = 1.e-10_rt;
             amrex::Real err = rosenbrock::error_norm(rstate);
-            amrex::Real controller_fac = 1.0_rt;
-
-            if (integrator_rp::rosenbrock_timestep_controller == 1) {
-                err = rosenbrock::yass_change_norm(rstate);
-                controller_fac = amrex::Clamp(1.0_rt / amrex::max(err, err_min),
-                                              integrator_rp::yass_fac_min,
-                                              integrator_rp::yass_fac_max);
-            } else {
-                controller_fac = amrex::Clamp(
-                    std::pow(1.0_rt / amrex::max(err, err_min),
-                             1.0_rt / (integrator_rp::h211b_b * integrator_rp::h211b_k)) *
-                    std::pow(1.0_rt / amrex::max(errold, err_min),
-                             1.0_rt / (integrator_rp::h211b_b * integrator_rp::h211b_k)) *
-                    std::pow(facold, -1.0_rt / integrator_rp::h211b_b),
-                    integrator_rp::h211b_fac_min, integrator_rp::h211b_fac_max);
-            }
+            amrex::Real controller_fac = amrex::Clamp(
+                std::pow(1.0_rt / amrex::max(err, err_min),
+                         1.0_rt / (integrator_rp::h211b_b * integrator_rp::h211b_k)) *
+                std::pow(1.0_rt / amrex::max(errold, err_min),
+                         1.0_rt / (integrator_rp::h211b_b * integrator_rp::h211b_k)) *
+                std::pow(facold, -1.0_rt / integrator_rp::h211b_b),
+                integrator_rp::h211b_fac_min, integrator_rp::h211b_fac_max);
             facold = controller_fac;
             errold = err;
 
@@ -613,14 +608,11 @@ int rosenbrock_integrator (BurnT& state, rosenbrock_t<integrator_neqs<BurnT>()>&
             n_reject += 1;
             last = false;
             if (n_reject >= 2) {
-                hnew *= integrator_rp::rosenbrock_timestep_controller == 1 ?
-                    integrator_rp::yass_reduction_fac : integrator_rp::h211b_reduction_fac;
+                hnew *= integrator_rp::h211b_reduction_fac;
             }
             if (valid_update) {
-                const amrex::Real reject_fac =
-                    integrator_rp::rosenbrock_timestep_controller == 1 ?
-                    integrator_rp::yass_reduction_fac : integrator_rp::h211b_reduction_fac;
-                h = posneg * amrex::min(std::abs(hnew), reject_fac * std::abs(h));
+                h = posneg * amrex::min(std::abs(hnew),
+                                         integrator_rp::h211b_reduction_fac * std::abs(h));
             } else {
                 h *= 0.25_rt;
             }
@@ -640,12 +632,6 @@ int rosenbrock_integrator (BurnT& state, rosenbrock_t<integrator_neqs<BurnT>()>&
     }
     if (integrator_rp::rosenbrock_tableau == 3) {
         return rosenbrock_integrator<BurnT, rosenbrock::ros2s_tableau>(state, rstate);
-    }
-    if (integrator_rp::rosenbrock_tableau == 4) {
-        return rosenbrock_integrator<BurnT, rosenbrock::ros2_tableau>(state, rstate);
-    }
-    if (integrator_rp::rosenbrock_tableau == 5) {
-        return rosenbrock_integrator<BurnT, rosenbrock::rosenbrock_euler_tableau>(state, rstate);
     }
 
     return rosenbrock_integrator<BurnT, rosenbrock::rodas5p_tableau>(state, rstate);
