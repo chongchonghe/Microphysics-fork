@@ -111,6 +111,10 @@ void jac (const amrex::Real time, BurnT& state, T& int_state, MatrixType& pd)
 
     // Call the specific network routine to get the Jacobian.
 
+#ifdef IS_JAFF
+    pd.zero();
+#endif
+
     actual_jac(state, pd);
 
     // The Jacobian from the nets is in terms of dYdot/dY, but we want

@@ -127,6 +127,10 @@ void jac ([[maybe_unused]] const amrex::Real time, BurnT& state, T& int_state, M
 
     integrator_to_burn(int_state, state);
 
+#ifdef IS_JAFF
+    pd.zero();
+#endif
+
 #ifdef NEW_NETWORK_IMPLEMENTATION
     RHS::jac(state, pd);
 #else
