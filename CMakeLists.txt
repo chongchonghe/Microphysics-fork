@@ -42,8 +42,8 @@ include(CMakePackageConfigHelpers)
 #                             NSPEC/SPECIES_ENUM/SPEC_NAMES/CHEM_BANDS instead of reading them from the
 #                             registry (mutually exclusive with the registry fields below). Also adds
 #                             -DIS_JAFF to the target(s) the caller adds afterwards, for jaff-specific
-#                             C++ code paths (e.g. integrator_rhs_strang.H/integrator_rhs_sdc.H skipping
-#                             the redundant pd.zero() that jaff-generated Jacobians already do).
+#                             C++ code paths (e.g. integrator_rhs_strang.H/integrator_rhs_sdc.H calling
+#                             pd.zero() that jaff-generated Jacobians don't do).
 #   JAFF_TOML                 Path to the network's jaffgen.toml. Only used if IS_JAFF. Out-of-tree
 #                             networks (e.g. Quokka's) live outside Microphysics, so this must be
 #                             supplied by the registry entry rather than derived from a path relative
