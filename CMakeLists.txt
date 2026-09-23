@@ -72,6 +72,7 @@ set(_registry_one_value_fields
       NSPEC NUM_CHEM_BANDS POWER_LAW_INDEX
       SPECIES_ENUM SPEC_NAMES SHORT_SPEC_NAMES
       AION AION_INV ZION AION_CONSTEXPR ZION_CONSTEXPR CHEM_BANDS
+      NUM_THERMAL_BANDS
       CACHE INTERNAL "")
 set(_registry_multi_value_fields EXTRA_SOURCES NETWORK_INCLUDE_DIRS CACHE INTERNAL "")
 set(_registry_fields ${_registry_one_value_fields} ${_registry_multi_value_fields} CACHE INTERNAL "")
