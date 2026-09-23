@@ -123,7 +123,7 @@ RArray1D& stage_vector (rosenbrock_t<int_neqs>& rstate, const int i)
 }
 
 #ifdef PHOTOCHEMISTRY
-// Only photon number density participates in error control.
+// Only chemical band photon number densities participate in error control.
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 bool rad_eq_in_error_control (const int n)
 {
