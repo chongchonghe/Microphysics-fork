@@ -26,6 +26,9 @@ void integrator_to_burn (const I& int_state, BurnT& state)
         state.re_thermal[n-1] = int_state.y(net_ienuc + NumChemRadEqs + n);
     }
     state.c_hat = int_state.c_hat;
+#ifdef DUST_CHEMICAL_BAND_ABSORPTION
+    state.e_dust_absorbed = int_state.y(net_ienuc + NumChemRadEqs + NumThermalBands + 1);
+#endif
 #endif
 
     if (integrator_rp::scale_system) {
@@ -56,6 +59,9 @@ void burn_to_integrator (const BurnT& state, I& int_state)
         int_state.y(net_ienuc + NumChemRadEqs + n) = state.re_thermal[n-1];
     }
     int_state.c_hat = state.c_hat;
+#ifdef DUST_CHEMICAL_BAND_ABSORPTION
+    int_state.y(net_ienuc + NumChemRadEqs + NumThermalBands + 1) = state.e_dust_absorbed;
+#endif
 #endif
 
     if (integrator_rp::scale_system) {
@@ -92,6 +98,10 @@ void clean_state (const amrex::Real time, BurnT& state, I& int_state)
     for (int n = net_ienuc+NumChemRadEqs+1; n <= net_ienuc+NumChemRadEqs+NumThermalBands; ++n) {
         int_state.y(n) = amrex::max(int_state.y(n), integrator_rp::SMALL_X_SAFE);
     }
+#ifdef DUST_CHEMICAL_BAND_ABSORPTION
+    int_state.y(net_ienuc+NumChemRadEqs+NumThermalBands+1) =
+        amrex::max(int_state.y(net_ienuc+NumChemRadEqs+NumThermalBands+1), 0.0_rt);
+#endif
 #endif
 
     // Renormalize the abundances as necessary.

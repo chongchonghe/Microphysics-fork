@@ -24,6 +24,9 @@ struct state_backup_t {
     amrex::Real rn_in[NumChemRadEqs]{};
     amrex::Real re_thermal_in[NumThermalBands]{};
     amrex::Real c_hat;
+#ifdef DUST_CHEMICAL_BAND_ABSORPTION
+    amrex::Real e_dust_absorbed_in{};
+#endif
 #endif
 #endif
 };
@@ -111,6 +114,10 @@ IntegratorT integrator_setup (BurnT& state, amrex::Real dt, bool is_retry)
         int_state.atol_enuc /= state.e_scale;
     }
 
+#ifdef DUST_CHEMICAL_BAND_ABSORPTION
+    state.e_dust_absorbed = 0.0_rt;
+#endif
+
     // Fill in the initial integration state.
 
     burn_to_integrator(state, int_state);
@@ -140,6 +147,9 @@ state_backup_t integrator_backup (const BurnT& state) {
         state_save.re_thermal_in[n] = state.re_thermal[n];
     }
     state_save.c_hat = state.c_hat;
+#ifdef DUST_CHEMICAL_BAND_ABSORPTION
+    state_save.e_dust_absorbed_in = state.e_dust_absorbed;
+#endif
 #endif
 #endif
     state_save.T_in = state.T;
@@ -261,6 +271,10 @@ void integrator_cleanup (IntegratorT& int_state, BurnT& state,
         for (const double X : state_save.re_thermal_in) {
             std::cout << std::scientific << std::setprecision(OUTDIGITS) << X << " ";
         }
+#ifdef DUST_CHEMICAL_BAND_ABSORPTION
+        std::cout << std::endl;
+        std::cout << "e_dust_absorbed start = " << std::scientific << std::setprecision(OUTDIGITS) << state_save.e_dust_absorbed_in;
+#endif
 #endif
         std::cout << std::endl;
         std::cout << "dens current = " << std::setprecision(OUTDIGITS) << state.rho << std::endl;
@@ -280,6 +294,10 @@ void integrator_cleanup (IntegratorT& int_state, BurnT& state,
         for (const double X : state.re_thermal) {
             std::cout << std::scientific << std::setprecision(OUTDIGITS) << X << " ";
         }
+#ifdef DUST_CHEMICAL_BAND_ABSORPTION
+        std::cout << std::endl;
+        std::cout << "e_dust_absorbed current = " << std::scientific << std::setprecision(OUTDIGITS) << state.e_dust_absorbed;
+#endif
 #endif
         std::cout << std::endl;
         std::cout << "energy generated = " << state.e << std::endl;
