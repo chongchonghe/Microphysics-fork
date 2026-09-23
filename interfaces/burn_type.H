@@ -98,7 +98,7 @@ struct burn_t
   amrex::Real c_hat{};
 #ifdef DUST_CHEMICAL_BAND_ABSORPTION
   amrex::Real dust_kappa{}; // dust opacity to ionizing radiation
-  amrex::Real e_dust_absorbed{}; // number density [cm^-3] of ionizing-band photons absorbed by dust this burn
+  amrex::Real e_dust_absorbed{}; // energy density [cm^-3] of ionizing-band photons absorbed by dust this burn
 #endif
 #endif
 
