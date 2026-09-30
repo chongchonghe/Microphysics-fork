@@ -285,6 +285,13 @@ function(setup_target_for_microphysics_compilation network_name output_dir)
       set(POWER_LAW_INDEX "${_f_POWER_LAW_INDEX}")
     endif()
 
+    # Photochemistry problems must use Rosenbrock.
+    if (NOT "${NUM_CHEM_BANDS}" STREQUAL "" AND NOT "${NUM_CHEM_BANDS}" EQUAL 0 AND NOT integrator_name STREQUAL "Rosenbrock")
+      message(FATAL_ERROR "setup_target_for_microphysics_compilation(${network_name}): "
+                           "NUM_CHEM_BANDS=${NUM_CHEM_BANDS} (photochemistry network) requires INTEGRATOR \"Rosenbrock\", "
+                           "got \"${integrator_name}\"")
+    endif()
+
     include_directories(
       BEFORE ${_dirs} "${output_dir}"
       "includes/extern_parameters.H" "includes/network_properties.H")
