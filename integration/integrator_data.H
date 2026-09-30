@@ -5,6 +5,10 @@
 
 #include <burn_type.H>
 
+#if defined (DUST_CHEMICAL_BAND_ABSORPTION) && !defined (STRANG)
+#error "DUST_CHEMICAL_BAND_ABSORPTION is only implemented for the Strang integrators (integrator_type_sdc.H does not map e_dust_absorbed, we don't use SDC anyway, so we don't maintain it)."
+#endif
+
 // Define the size of the ODE system that VODE will integrate
 
 #if !defined (PHOTOCHEMISTRY)
@@ -62,9 +66,6 @@ constexpr int integrator_neqs ()
     int_neqs = NumSpec + 1;
 #ifdef PHOTOCHEMISTRY
     int_neqs += NumChemRadEqs + NumThermalBands;
-#ifdef DUST_CHEMICAL_BAND_ABSORPTION
-    int_neqs += 1;
-#endif
 #endif
 #endif
 
