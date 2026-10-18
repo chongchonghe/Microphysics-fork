@@ -285,11 +285,13 @@ function(setup_target_for_microphysics_compilation network_name output_dir)
       set(POWER_LAW_INDEX "${_f_POWER_LAW_INDEX}")
     endif()
 
-    # Photochemistry problems must use Rosenbrock.
-    if (NOT "${NUM_CHEM_BANDS}" STREQUAL "" AND NOT "${NUM_CHEM_BANDS}" EQUAL 0 AND NOT integrator_name STREQUAL "Rosenbrock")
+    # Photochemistry problems must use Rosenbrock, or VODE for networks without thermal bands
+    # (VODE has no error weights for thermal-band variables).
+    if (NOT "${NUM_CHEM_BANDS}" STREQUAL "" AND NOT "${NUM_CHEM_BANDS}" EQUAL 0 AND NOT integrator_name STREQUAL "Rosenbrock"
+        AND NOT (integrator_name STREQUAL "VODE" AND "${NUM_THERMAL_BANDS}" EQUAL 0))
       message(FATAL_ERROR "setup_target_for_microphysics_compilation(${network_name}): "
                            "NUM_CHEM_BANDS=${NUM_CHEM_BANDS} (photochemistry network) requires INTEGRATOR \"Rosenbrock\", "
-                           "got \"${integrator_name}\"")
+                           "or \"VODE\" when NUM_THERMAL_BANDS=0; got \"${integrator_name}\" with NUM_THERMAL_BANDS=${NUM_THERMAL_BANDS}")
     endif()
 
     include_directories(

@@ -10,6 +10,13 @@
 #include <vode_type.H>
 #include <vode_dvode.H>
 
+#ifdef PHOTOCHEMISTRY
+static_assert(NumThermalBands == 0, "VODE photochemistry supports chemical bands only: it has no error weights for thermal-band variables");
+#ifdef DUST_CHEMICAL_BAND_ABSORPTION
+#error "VODE photochemistry does not support DUST_CHEMICAL_BAND_ABSORPTION: it has no error weight for the dust-absorbed energy"
+#endif
+#endif
+
 template <typename BurnT>
 AMREX_GPU_HOST_DEVICE AMREX_INLINE
 void actual_integrator (BurnT& state, amrex::Real dt, bool is_retry=false)
