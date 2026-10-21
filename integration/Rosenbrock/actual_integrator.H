@@ -23,6 +23,7 @@ void actual_integrator (BurnT& state, amrex::Real dt, bool is_retry=false)
     int istate = rosenbrock_integrator(state, rosenbrock_state);
 
     integrator_cleanup(rosenbrock_state, state, istate, state_save, dt);
+    state.n_rej = rosenbrock_state.n_rej;
 }
 
 #endif

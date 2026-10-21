@@ -30,6 +30,7 @@ struct rosenbrock_t {
     int n_step;
     int n_rhs;
     int n_jac;
+    int n_rej;
 
     amrex::Real atol_spec;
     amrex::Real rtol_spec;

@@ -173,7 +173,10 @@ struct burn_t
 #endif
 
   // diagnostics
-  int n_rhs{}, n_jac{}, n_step{};
+  int n_rhs{}, n_jac{}, n_step{}, n_rej{};
+
+  // Rosenbrock tableau for this burn; negative means integrator.rosenbrock_tableau
+  int rosenbrock_tableau{-1};
 
   // Was the burn successful?
   bool success{};

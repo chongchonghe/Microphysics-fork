@@ -407,6 +407,7 @@ int rosenbrock_integrator (BurnT& state, rosenbrock_t<integrator_neqs<BurnT>()>&
     rstate.n_rhs = 0;
     rstate.n_jac = 0;
     rstate.n_step = 0;
+    rstate.n_rej = 0;
 
     rstate.dt = rstate.tout - rstate.t;
 
@@ -508,6 +509,7 @@ int rosenbrock_integrator (BurnT& state, rosenbrock_t<integrator_neqs<BurnT>()>&
                 }
                 h *= 0.5_rt;
                 reject = true;
+                rstate.n_rej += 1;
                 last = false;
                 continue;
             }
@@ -532,6 +534,7 @@ int rosenbrock_integrator (BurnT& state, rosenbrock_t<integrator_neqs<BurnT>()>&
                     h *= 0.25_rt;
                     reject = true;
                     n_reject += 1;
+                    rstate.n_rej += 1;
                     last = false;
                     valid_stage_state = false;
                     break;
@@ -570,6 +573,7 @@ int rosenbrock_integrator (BurnT& state, rosenbrock_t<integrator_neqs<BurnT>()>&
             if (! valid_state) {
                 reject = true;
                 n_reject += 1;
+                rstate.n_rej += 1;
                 last = false;
                 h *= 0.25_rt;
                 continue;
@@ -616,6 +620,7 @@ int rosenbrock_integrator (BurnT& state, rosenbrock_t<integrator_neqs<BurnT>()>&
 
             reject = true;
             n_reject += 1;
+            rstate.n_rej += 1;
             last = false;
             if (n_reject >= 2) {
                 hnew *= integrator_rp::h211b_reduction_fac;
@@ -634,13 +639,14 @@ template <typename BurnT>
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 int rosenbrock_integrator (BurnT& state, rosenbrock_t<integrator_neqs<BurnT>()>& rstate)
 {
-    if (integrator_rp::rosenbrock_tableau == 1) {
+    const int tableau = state.rosenbrock_tableau >= 0 ? state.rosenbrock_tableau : integrator_rp::rosenbrock_tableau;
+    if (tableau == 1) {
         return rosenbrock_integrator<BurnT, rosenbrock::rodas4p_tableau>(state, rstate);
     }
-    if (integrator_rp::rosenbrock_tableau == 2) {
+    if (tableau == 2) {
         return rosenbrock_integrator<BurnT, rosenbrock::rodas3p_tableau>(state, rstate);
     }
-    if (integrator_rp::rosenbrock_tableau == 3) {
+    if (tableau == 3) {
         return rosenbrock_integrator<BurnT, rosenbrock::ros2s_tableau>(state, rstate);
     }
 
