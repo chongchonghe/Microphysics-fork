@@ -40,7 +40,11 @@ namespace ArrayUtil
         AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
         void zero()
         {
+#ifdef ROSENBROCK_UNROLL_STAGES
+#pragma unroll
+#else
             AMREX_UNROLL_LOOP(NET_LOOP_UNROLL_LEN)
+#endif
             for (int i = 0; i < (YHI-YLO+1)*(XHI-XLO+1); ++i) {
                 arr[i] = 0.0_rt;
             }
@@ -48,6 +52,9 @@ namespace ArrayUtil
 
         AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
         void mul (const amrex::Real x) noexcept {
+#ifdef ROSENBROCK_UNROLL_STAGES
+#pragma unroll
+#endif
             for (int i = 0; i < (YHI-YLO+1)*(XHI-XLO+1); ++i) {
                 arr[i] *= x;
             }

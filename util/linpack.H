@@ -6,10 +6,127 @@
 
 #include <ArrayUtilities.H>
 
+#ifdef MICROPHYSICS_STATIC_PIVOT
+// Partial pivoting with only compile-time indices: every loop is fully unrolled and the row swaps are done with
+// "if (i == l)" selects instead of indexing by the runtime pivot row l. Same operations in the same order as the
+// dynamic version below, so the results are identical, but a and b can stay in registers on GPUs.
+template <int num_eqs>
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+void dgesl_static_pivot (const RArray2D& a, const IArray1D& pivot, RArray1D& b)
+{
+#pragma unroll
+    for (int k = 1; k <= num_eqs - 1; ++k) {
+        const int l = pivot(k);
+        amrex::Real t = b(k);
+#pragma unroll
+        for (int i = k+1; i <= num_eqs; ++i) {
+            if (i == l) {
+                t = b(i);
+                b(i) = b(k);
+                b(k) = t;
+            }
+        }
+#pragma unroll
+        for (int j = k+1; j <= num_eqs; ++j) {
+            b(j) += t * a(j,k);
+        }
+    }
+#pragma unroll
+    for (int kb = 1; kb <= num_eqs; ++kb) {
+        const int k = num_eqs + 1 - kb;
+        b(k) = b(k) / a(k,k);
+        const amrex::Real t = -b(k);
+#pragma unroll
+        for (int j = 1; j <= k-1; ++j) {
+            b(j) += t * a(j,k);
+        }
+    }
+}
+
+template <int num_eqs>
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+void dgefa_static_pivot (RArray2D& a, IArray1D& pivot, int& info)
+{
+    info = 0;
+#pragma unroll
+    for (int k = 1; k <= num_eqs - 1; ++k) {
+        int l = k;
+        amrex::Real dmax = std::abs(a(k,k));
+#pragma unroll
+        for (int i = k+1; i <= num_eqs; ++i) {
+            const amrex::Real ai = std::abs(a(i,k));
+            if (ai > dmax) {
+                l = i;
+                dmax = ai;
+            }
+        }
+        pivot(k) = static_cast<short>(l);
+
+        amrex::Real alk = a(k,k); // a(l,k)
+#pragma unroll
+        for (int i = k+1; i <= num_eqs; ++i) {
+            if (i == l) {
+                alk = a(i,k);
+            }
+        }
+
+        if (alk != 0.0e0_rt) {
+            // interchange a(l,k) and a(k,k) if necessary
+#pragma unroll
+            for (int i = k+1; i <= num_eqs; ++i) {
+                if (i == l) {
+                    a(i,k) = a(k,k);
+                    a(k,k) = alk;
+                }
+            }
+
+            // compute multipliers
+            const amrex::Real tm = -1.0e0_rt / a(k,k);
+#pragma unroll
+            for (int j = k+1; j <= num_eqs; ++j) {
+                a(j,k) *= tm;
+            }
+
+            // row elimination with column indexing
+#pragma unroll
+            for (int j = k+1; j <= num_eqs; ++j) {
+                amrex::Real t = a(k,j); // a(l,j)
+#pragma unroll
+                for (int i = k+1; i <= num_eqs; ++i) {
+                    if (i == l) {
+                        t = a(i,j);
+                        a(i,j) = a(k,j);
+                        a(k,j) = t;
+                    }
+                }
+#pragma unroll
+                for (int i = k+1; i <= num_eqs; ++i) {
+                    a(i,j) += t * a(i,k);
+                }
+            }
+        } else {
+            info = k;
+        }
+    }
+
+    pivot(num_eqs) = static_cast<short>(num_eqs);
+
+    if (a(num_eqs,num_eqs) == 0.0e0_rt) {
+        info = num_eqs;
+    }
+}
+#endif
+
 template <int num_eqs, bool allow_pivot>
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 void dgesl (const RArray2D& a, const IArray1D& pivot, RArray1D& b)
 {
+#ifdef MICROPHYSICS_STATIC_PIVOT
+    if constexpr (allow_pivot) {
+        dgesl_static_pivot<num_eqs>(a, pivot, b);
+        return;
+    }
+#endif
 
     constexpr int nm1 = num_eqs - 1;
 
@@ -64,6 +181,13 @@ void dgefa (RArray2D& a, IArray1D& pivot, int& info)
     // triangular matrices and u is upper triangular.
 
     // gaussian elimination with partial pivoting
+
+#ifdef MICROPHYSICS_STATIC_PIVOT
+    if constexpr (allow_pivot) {
+        dgefa_static_pivot<num_eqs>(a, pivot, info);
+        return;
+    }
+#endif
 
     info = 0;
     constexpr int nm1 = num_eqs - 1;

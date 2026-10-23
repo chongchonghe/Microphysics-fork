@@ -34,6 +34,10 @@ AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 void integrator (BurnT& state, amrex::Real dt)
 {
 
+#ifdef MICROPHYSICS_NO_BURN_RETRY
+    // compile only the no-retry path (integrator.use_burn_retry is ignored)
+    integrator_wrapper<BurnT, false>(state, dt);
+#else
     if (integrator_rp::use_burn_retry) {
         constexpr bool enable_retry{true};
         integrator_wrapper<BurnT, enable_retry>(state, dt);
@@ -42,6 +46,7 @@ void integrator (BurnT& state, amrex::Real dt)
         integrator_wrapper<BurnT, enable_retry>(state, dt);
 
     }
+#endif
 }
 
 #endif

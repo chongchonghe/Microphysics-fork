@@ -272,6 +272,12 @@ void evaluate_jacobian (BurnT& state, rosenbrock_t<int_neqs>& rstate, const amre
     rhs(time, state, rstate, rstate.ak1, in_jacobian);
     rstate.n_rhs += 1;
 
+#ifdef ROSENBROCK_ANALYTIC_JAC_ONLY
+    // no finite-difference fallback: its loop over a runtime column index j forces rstate into scratch memory on GPUs.
+    // A non-finite analytic Jacobian then makes the step fail (non-finite stages) instead of switching to finite differences.
+    jac(time, state, rstate, rstate.jac);
+    rstate.n_jac += 1;
+#else
     if (rstate.jacobian_type == 1) {
         jac(time, state, rstate, rstate.jac);
         rstate.n_jac += 1;
@@ -325,6 +331,7 @@ void evaluate_jacobian (BurnT& state, rosenbrock_t<int_neqs>& rstate, const amre
 
     rstate.n_rhs += int_neqs;
     rstate.n_jac += 1;
+#endif
 }
 
 template <typename BurnT, int int_neqs>
@@ -351,7 +358,13 @@ template <int int_neqs>
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 int decompose (rosenbrock_t<int_neqs>& rstate, const amrex::Real fac)
 {
+#ifdef ROSENBROCK_UNROLL_STAGES
+#pragma unroll
+#endif
     for (int j = 1; j <= int_neqs; ++j) {
+#ifdef ROSENBROCK_UNROLL_STAGES
+#pragma unroll
+#endif
         for (int i = 1; i <= int_neqs; ++i) {
             rstate.jac(i, j) = -rstate.jac(i, j);
         }
@@ -359,6 +372,11 @@ int decompose (rosenbrock_t<int_neqs>& rstate, const amrex::Real fac)
     }
 
     int ierr_linpack = 0;
+#ifdef MICROPHYSICS_STATIC_PIVOT
+    // always pivot (integrator.linalg_do_pivoting is ignored), so the unpivoted, runtime-indexed LU is not compiled in
+    dgefa<int_neqs, true>(rstate.jac, rstate.pivot, ierr_linpack);
+    return ierr_linpack;
+#endif
     if (integrator_rp::linalg_do_pivoting == 1) {
         constexpr bool allow_pivot{true};
         dgefa<int_neqs, allow_pivot>(rstate.jac, rstate.pivot, ierr_linpack);
@@ -374,6 +392,10 @@ template <int int_neqs>
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 void solve (rosenbrock_t<int_neqs>& rstate, RArray1D& b)
 {
+#ifdef MICROPHYSICS_STATIC_PIVOT
+    dgesl<int_neqs, true>(rstate.jac, rstate.pivot, b);
+    return;
+#endif
     if (integrator_rp::linalg_do_pivoting == 1) {
         constexpr bool allow_pivot{true};
         dgesl<int_neqs, allow_pivot>(rstate.jac, rstate.pivot, b);
@@ -515,11 +537,20 @@ int rosenbrock_integrator (BurnT& state, rosenbrock_t<integrator_neqs<BurnT>()>&
             rosenbrock::solve(rstate, rstate.ak1);
 
             bool valid_stage_state = true;
+#ifdef ROSENBROCK_UNROLL_STAGES
+#pragma unroll
+#endif
             for (int istage = 2; istage <= C::stages; ++istage) {
+#ifdef ROSENBROCK_UNROLL_STAGES
+#pragma unroll
+#endif
                 for (int n = 1; n <= int_neqs; ++n) {
                     rstate.ynew(n) = rstate.y(n);
                     rosenbrock::stage(rstate, istage, n) = 0.0_rt;
 
+#ifdef ROSENBROCK_UNROLL_STAGES
+#pragma unroll
+#endif
                     for (int jstage = 1; jstage < istage; ++jstage) {
                         const amrex::Real akj = rosenbrock::stage(rstate, jstage, n);
                         rstate.ynew(n) += C::a(istage, jstage) * akj;
@@ -550,10 +581,16 @@ int rosenbrock_integrator (BurnT& state, rosenbrock_t<integrator_neqs<BurnT>()>&
                 continue;
             }
 
+#ifdef ROSENBROCK_UNROLL_STAGES
+#pragma unroll
+#endif
             for (int n = 1; n <= int_neqs; ++n) {
                 amrex::Real y_update = 0.0_rt;
                 amrex::Real err = 0.0_rt;
 
+#ifdef ROSENBROCK_UNROLL_STAGES
+#pragma unroll
+#endif
                 for (int istage = 1; istage <= C::stages; ++istage) {
                     const amrex::Real aki = rosenbrock::stage(rstate, istage, n);
                     y_update += C::b(istage) * aki;
@@ -634,6 +671,18 @@ template <typename BurnT>
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 int rosenbrock_integrator (BurnT& state, rosenbrock_t<integrator_neqs<BurnT>()>& rstate)
 {
+#ifdef ROSENBROCK_FIXED_TABLEAU
+    // compile only this tableau (integrator.rosenbrock_tableau is ignored), keeping the others out of the kernel
+    if constexpr (ROSENBROCK_FIXED_TABLEAU == 1) {
+        return rosenbrock_integrator<BurnT, rosenbrock::rodas4p_tableau>(state, rstate);
+    } else if constexpr (ROSENBROCK_FIXED_TABLEAU == 2) {
+        return rosenbrock_integrator<BurnT, rosenbrock::rodas3p_tableau>(state, rstate);
+    } else if constexpr (ROSENBROCK_FIXED_TABLEAU == 3) {
+        return rosenbrock_integrator<BurnT, rosenbrock::ros2s_tableau>(state, rstate);
+    } else {
+        return rosenbrock_integrator<BurnT, rosenbrock::rodas5p_tableau>(state, rstate);
+    }
+#else
     if (integrator_rp::rosenbrock_tableau == 1) {
         return rosenbrock_integrator<BurnT, rosenbrock::rodas4p_tableau>(state, rstate);
     }
@@ -645,6 +694,7 @@ int rosenbrock_integrator (BurnT& state, rosenbrock_t<integrator_neqs<BurnT>()>&
     }
 
     return rosenbrock_integrator<BurnT, rosenbrock::rodas5p_tableau>(state, rstate);
+#endif
 }
 
 #endif
