@@ -16,7 +16,7 @@
 #include <jacobian_utilities.H>
 #include <extern_parameters.H>
 
-using namespace amrex;
+using amrex::Real;
 using namespace ArrayUtil;
 using namespace network_rp;
 
@@ -24,8 +24,8 @@ using namespace network_rp;
 
 AMREX_GPU_HOST_DEVICE AMREX_INLINE
 void rhs_specie(const burn_t& state,
-             Array1D<Real, 1, neqs>& ydot,
-             const Array1D<Real, 0, NumSpec-1>& X,
+             amrex::Array1D<Real, 1, neqs>& ydot,
+             const amrex::Array1D<Real, 0, NumSpec-1>& X,
              Real const /*z*/) {
 
     using namespace Rates;
@@ -364,7 +364,7 @@ void rhs_specie(const burn_t& state,
 
 AMREX_GPU_HOST_DEVICE AMREX_INLINE
 Real rhs_eint(const burn_t& state,
-             const Array1D<Real, 0, NumSpec-1>& X,
+             const amrex::Array1D<Real, 0, NumSpec-1>& X,
              Real const z) {
 
     using namespace Rates;
@@ -1202,11 +1202,11 @@ Real rhs_eint(const burn_t& state,
 
 
 AMREX_GPU_HOST_DEVICE AMREX_INLINE
-void actual_rhs (const burn_t& state, Array1D<Real, 1, neqs>& ydot)
+void actual_rhs (const burn_t& state, amrex::Array1D<Real, 1, neqs>& ydot)
 {
     Real z = redshift;
 
-    Array1D<Real, 0, NumSpec-1> X;
+    amrex::Array1D<Real, 0, NumSpec-1> X;
     for (int i = 0; i < NumSpec; ++i) {
            X(i) = state.xn[i];
     }
@@ -1229,7 +1229,7 @@ template<class MatrixType>
 AMREX_GPU_HOST_DEVICE AMREX_INLINE
 void jac_nuc(const burn_t& state,
              MatrixType& jac,
-             const Array1D<Real, 0, NumSpec-1>& X,
+             const amrex::Array1D<Real, 0, NumSpec-1>& X,
              Real const z)
 {
 
@@ -6692,7 +6692,7 @@ void actual_jac(const burn_t& state, MatrixType& jac)
 {
     Real z = redshift;
 
-    Array1D<Real, 0, NumSpec-1> X;
+    amrex::Array1D<Real, 0, NumSpec-1> X;
     for (int i = 0; i < NumSpec; ++i) {
         X(i) = state.xn[i];
     }

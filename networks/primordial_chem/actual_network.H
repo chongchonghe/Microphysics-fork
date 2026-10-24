@@ -9,8 +9,6 @@
 #include <network_properties.H>
 #include <burn_type.H>
 
-using namespace amrex;
-
 void actual_network_init();
 
 constexpr std::string_view network_name = "pynucastro-cxx";
